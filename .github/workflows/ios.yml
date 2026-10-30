@@ -1,0 +1,43 @@
+name: build-ios
+
+# Builds an UNSIGNED NovaRide.ipa on a GitHub macOS runner (no Mac needed on your side).
+# Install it on an iPhone from Windows with Sideloadly or AltStore (signs it with your own Apple ID).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['ios/**', 'app/widgets/starter/**', 'app/widgetlib.js']
+
+jobs:
+  ipa:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Compile starter widgets for the app
+        run: |
+          node tools/widget_cli.js bin ios/NovaRide/Resources/widgets \
+            app/widgets/starter/classic-ring.json app/widgets/starter/big-speed.json \
+            app/widgets/starter/power-focus.json app/widgets/starter/minimal.json
+      - name: Generate the Xcode project
+        run: |
+          brew install xcodegen
+          cd ios/NovaRide && xcodegen generate
+      - name: Build (no code signing)
+        run: |
+          cd ios/NovaRide
+          xcodebuild -project NovaRide.xcodeproj -scheme NovaRide -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+      - name: Package .ipa
+        run: |
+          cd ios/NovaRide
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/NovaRide.app Payload/
+          zip -qr NovaRide.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaRide-ipa
+          path: ios/NovaRide/NovaRide.ipa
