@@ -1,0 +1,58 @@
+name: widget-publish
+
+# A shared widget is an issue titled "[widget] ..." with the JSON in a code block.
+# When the repository owner adds the label "approved", the widget is validated and published.
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+jobs:
+  publish:
+    if: github.event.label.name == 'approved' && startsWith(github.event.issue.title, '[widget]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Validate and store
+        id: pub
+        env:
+          BODY: ${{ github.event.issue.body }}
+          NUM: ${{ github.event.issue.number }}
+        run: |
+          printf '%s' "$BODY" > /tmp/body.txt
+          set +e
+          OUT=$(node tools/widget_publish.js /tmp/body.txt "$NUM")
+          CODE=$?
+          echo "result=$OUT" >> "$GITHUB_OUTPUT"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Commit
+        if: steps.pub.outputs.code == '0'
+        run: |
+          git config user.name "nova-bot"
+          git config user.email "nova-bot@users.noreply.github.com"
+          git add app/widgets/community
+          git commit -m "Publish community widget (#${{ github.event.issue.number }})" || true
+          git push
+          gh workflow run deploy-app || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Reply and close
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ steps.pub.outputs.result }}
+          CODE: ${{ steps.pub.outputs.code }}
+        run: |
+          if [ "$CODE" = "0" ]; then
+            gh issue comment ${{ github.event.issue.number }} --body "Tak! Widgetten er udgivet ($RESULT). Den vises på siden om et par minutter."
+            gh issue close ${{ github.event.issue.number }}
+          else
+            gh issue comment ${{ github.event.issue.number }} --body "Widgetten blev ikke udgivet: $RESULT"
+          fi
